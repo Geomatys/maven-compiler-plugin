@@ -39,6 +39,20 @@ under the License.
     <contributor>
       <name>Jan Sievers</name>
     </contributor>
+    <contributor>
+      <name>Trygve Laugstøl</name>
+      <email>trygvis@inamo.no</email>
+    </contributor>
+    <contributor>
+      <name>Jason van Zyl</name>
+      <email>jason@maven.org</email>
+    </contributor>
+    <contributor>
+      <name>Andreas Gudian</name>
+    </contributor>
+    <contributor>
+      <name>Martin Desruisseaux</name>
+    </contributor>
   </contributors>
 
   <prerequisites>
@@ -67,7 +81,7 @@ under the License.
   </distributionManagement>
 
   <properties>
-    <mavenVersion>4.0.0-alpha-13-SNAPSHOT</mavenVersion>
+    <mavenVersion>4.0.0-beta-1-SNAPSHOT</mavenVersion>
     <!--
       ! The following property is used in the integration tests MCOMPILER-157
     -->
@@ -79,13 +93,15 @@ under the License.
     <groovy-eclipse-batch>2.5.14-02</groovy-eclipse-batch>
     <plexus-java.version>1.1.1</plexus-java.version>
     <version.plexus-xml>4.0.1</version.plexus-xml>
-    <javaVersion>8</javaVersion>
+    <javaVersion>17</javaVersion>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
     <junitVersion>5.10.1</junitVersion>
     <mockitoVersion>4.11.0</mockitoVersion>
     <maven.it.failure.ignore>false</maven.it.failure.ignore>
     <surefire.version>3.2.1</surefire.version>
     <mavenPluginPluginVersion>3.11.1-SNAPSHOT</mavenPluginPluginVersion>
-    <mavenPluginTestingHarnessVersion>4.0.0-alpha-3-SNAPSHOT</mavenPluginTestingHarnessVersion>
+    <mavenPluginTestingHarnessVersion>4.0.0-beta-1-SNAPSHOT</mavenPluginTestingHarnessVersion>
     <project.build.outputTimestamp>2022-03-08T01:04:02Z</project.build.outputTimestamp>
     <invoker.junitPackageName>org.apache.maven.plugins.compiler.its</invoker.junitPackageName>
   </properties>

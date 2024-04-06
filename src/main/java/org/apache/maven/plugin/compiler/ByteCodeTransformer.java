@@ -31,15 +31,43 @@ import org.objectweb.asm.ModuleVisitor;
 import org.objectweb.asm.Opcodes;
 
 /**
- * {@code module-info.class} bytecode transformer for
- * <a href="https://issues.apache.org/jira/browse/MCOMPILER-542">MCOMPILER-542</a>:
- * drops detailed JDK version.
+ * This class is the central place where all byte code transformations are applied.
+ * Using a separated class reduces the risk of loading the {@code org.objectweb.asm}
+ * classes when not needed. The transformations can be:
+ *
+ * <ul>
+ *   <li>Generating {@code package-info.class} class if the {@code -Xpkginfo:always} option is not supported.</li>
+ *   <li>Dropping detailed JDK version from the {@code module-info.class} file (workaround for
+ *       <a href="https://issues.apache.org/jira/browse/MCOMPILER-542">MCOMPILER-542</a>).</li>
+ * </ul>
+ *
+ * <b>Note:</b> {@code package-info.class} generation has been removed because it is not needed anymore for
+ * incremental build. If nevertheless desired, it can be done with the {@code -Xpkginfo:always} option with
+ * compilers derived from OpenJDK.
  */
-final class ModuleInfoTransformer {
+final class ByteCodeTransformer {
+    /**
+     * The Java version containing the fix for "the module-infos for --release data do not contain pre-set versions"
+     * issue.
+     *
+     * @see <a href="https://bugs.openjdk.org/browse/JDK-8318913">JDK-8318913</a>
+     */
+    static final int MODULE_VERSION_FIX = 22;
 
-    private ModuleInfoTransformer() {}
+    private ByteCodeTransformer() {}
 
-    static byte[] transform(byte[] originalBytecode, String javaVersion, Log log) {
+    /**
+     * JDK-8318913 workaround: Patch module-info.class to set the java release version for java/jdk modules.
+     * This patch is needed only for Java versions older than 22.
+     *
+     * @param originalBytecode the byte code to patch
+     * @return the patched byte code, or {@code null} if no change is needed
+     *
+     * @see <a href="https://issues.apache.org/jira/browse/MCOMPILER-542">MCOMPILER-542</a>
+     * @see <a href="https://bugs.openjdk.org/browse/JDK-8318913">JDK-8318913</a>
+     * @see #MODULE_VERSION_FIX
+     */
+    static byte[] patchJdkModuleVersion(byte[] originalBytecode, String javaVersion, Log log) {
         List<String> modulesModified = new ArrayList<>();
         Set<String> foundVersions = new HashSet<>();
         ClassReader reader = new ClassReader(originalBytecode);
@@ -67,13 +95,10 @@ final class ModuleInfoTransformer {
                 };
             }
         };
-
         reader.accept(classVisitor, 0);
-
         if (modulesModified.isEmpty()) {
             return null;
         }
-
         log.info(String.format(
                 "JDK-8318913 workaround: patched module-info.class requires version from %s to [%s] on %d JDK modules %s",
                 foundVersions, javaVersion, modulesModified.size(), modulesModified));

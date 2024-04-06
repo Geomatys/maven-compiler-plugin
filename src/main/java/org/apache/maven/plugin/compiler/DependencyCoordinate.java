@@ -18,12 +18,21 @@
  */
 package org.apache.maven.plugin.compiler;
 
+import java.util.Objects;
+
+import org.apache.maven.api.Session;
+import org.apache.maven.api.services.DependencyCoordinateFactory;
+import org.apache.maven.api.services.DependencyCoordinateFactoryRequest;
+
 /**
  * Simple representation of Maven-coordinates of a dependency.
  *
  * @author Andreas Gudian
  * @since 3.4
+ *
+ * @deprecated Used for {@link AbstractCompilerMojo#annotationProcessorPaths}, which is deprecated.
  */
+@Deprecated(since = "4.0.0")
 public class DependencyCoordinate {
     private String groupId;
 
@@ -77,14 +86,7 @@ public class DependencyCoordinate {
 
     @Override
     public int hashCode() {
-        final int prime = 31;
-        int result = 1;
-        result = prime * result + ((artifactId == null) ? 0 : artifactId.hashCode());
-        result = prime * result + ((classifier == null) ? 0 : classifier.hashCode());
-        result = prime * result + ((groupId == null) ? 0 : groupId.hashCode());
-        result = prime * result + ((type == null) ? 0 : type.hashCode());
-        result = prime * result + ((version == null) ? 0 : version.hashCode());
-        return result;
+        return Objects.hash(groupId, artifactId, version, classifier, type);
     }
 
     @Override
@@ -92,54 +94,38 @@ public class DependencyCoordinate {
         if (this == obj) {
             return true;
         }
-        if (obj == null) {
-            return false;
-        }
-        if (getClass() != obj.getClass()) {
+        if (obj == null || getClass() != obj.getClass()) {
             return false;
         }
         DependencyCoordinate other = (DependencyCoordinate) obj;
-        if (artifactId == null) {
-            if (other.artifactId != null) {
-                return false;
-            }
-        } else if (!artifactId.equals(other.artifactId)) {
-            return false;
-        }
-        if (classifier == null) {
-            if (other.classifier != null) {
-                return false;
-            }
-        } else if (!classifier.equals(other.classifier)) {
-            return false;
-        }
-        if (groupId == null) {
-            if (other.groupId != null) {
-                return false;
-            }
-        } else if (!groupId.equals(other.groupId)) {
-            return false;
-        }
-        if (type == null) {
-            if (other.type != null) {
-                return false;
-            }
-        } else if (!type.equals(other.type)) {
-            return false;
-        }
-        if (version == null) {
-            if (other.version != null) {
-                return false;
-            }
-        } else if (!version.equals(other.version)) {
-            return false;
-        }
-        return true;
+        return Objects.equals(groupId, other.groupId)
+                && Objects.equals(artifactId, other.artifactId)
+                && Objects.equals(version, other.version)
+                && Objects.equals(classifier, other.classifier)
+                && Objects.equals(type, other.type);
     }
 
     @Override
     public String toString() {
         return groupId + ":" + artifactId + (version != null ? ":" + version : "")
                 + (classifier != null ? ":" + classifier : "") + (type != null ? "." + type : "");
+    }
+
+    /**
+     * Converts this coordinate to the Maven API.
+     *
+     * @param session the current build session instance
+     * @return this coordinate as Maven API
+     */
+    final org.apache.maven.api.DependencyCoordinate toCoordinate(Session session) {
+        return session.getService(DependencyCoordinateFactory.class)
+                .create(DependencyCoordinateFactoryRequest.builder()
+                        .session(session)
+                        .groupId(groupId)
+                        .artifactId(artifactId)
+                        .version(version)
+                        .classifier(classifier)
+                        .type(type)
+                        .build());
     }
 }

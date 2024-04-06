@@ -18,453 +18,281 @@
  */
 package org.apache.maven.plugin.compiler;
 
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import org.apache.maven.api.JavaToolchain;
-import org.apache.maven.api.PathScope;
 import org.apache.maven.api.ProjectScope;
-import org.apache.maven.api.Toolchain;
+import org.apache.maven.api.annotations.Nonnull;
+import org.apache.maven.api.annotations.Nullable;
 import org.apache.maven.api.plugin.MojoException;
-import org.apache.maven.api.plugin.annotations.LifecyclePhase;
 import org.apache.maven.api.plugin.annotations.Mojo;
 import org.apache.maven.api.plugin.annotations.Parameter;
-import org.codehaus.plexus.compiler.util.scan.SimpleSourceInclusionScanner;
-import org.codehaus.plexus.compiler.util.scan.SourceInclusionScanner;
-import org.codehaus.plexus.compiler.util.scan.StaleSourceScanner;
-import org.codehaus.plexus.languages.java.jpms.JavaModuleDescriptor;
-import org.codehaus.plexus.languages.java.jpms.LocationManager;
-import org.codehaus.plexus.languages.java.jpms.ResolvePathsRequest;
-import org.codehaus.plexus.languages.java.jpms.ResolvePathsResult;
 
 /**
  * Compiles application test sources.
  *
- * @author <a href="mailto:jason@maven.org">Jason van Zyl</a>
+ * @author Jason van Zyl
+ * @author Martin Desruisseaux
  * @since 2.0
  */
-@Mojo(name = "testCompile", defaultPhase = LifecyclePhase.TEST_COMPILE)
+@Mojo(name = "testCompile", defaultPhase = "COMPILE")
 public class TestCompilerMojo extends AbstractCompilerMojo {
     /**
-     * Set this to 'true' to bypass compilation of test sources.
-     * Its use is NOT RECOMMENDED, but quite convenient on occasion.
+     * Whether to bypass compilation of test sources.
+     * Its use is not recommended, but quite convenient on occasion.
      */
     @Parameter(property = "maven.test.skip")
-    private boolean skip;
+    protected boolean skip;
 
     /**
      * The source directories containing the test-source to be compiled.
      */
     @Parameter
-    private List<String> compileSourceRoots;
-
-    /**
-     * The directory where compiled test classes go.
-     */
-    @Parameter(defaultValue = "${project.build.outputDirectory}", required = true, readonly = true)
-    private Path mainOutputDirectory;
+    protected List<String> compileSourceRoots;
 
     /**
      * The directory where compiled test classes go.
      */
     @Parameter(defaultValue = "${project.build.testOutputDirectory}", required = true, readonly = true)
-    private Path outputDirectory;
+    protected Path outputDirectory;
 
     /**
-     * A list of inclusion filters for the compiler.
+     * A set of inclusion filters for the compiler.
      */
     @Parameter
-    private Set<String> testIncludes = new HashSet<>();
+    protected Set<String> testIncludes;
 
     /**
-     * A list of exclusion filters for the compiler.
+     * A set of exclusion filters for the compiler.
      */
     @Parameter
-    private Set<String> testExcludes = new HashSet<>();
+    protected Set<String> testExcludes;
 
     /**
-     * A list of exclusion filters for the incremental calculation.
+     * A set of exclusion filters for the incremental calculation.
+     * Updated files, if excluded by this filter, will not cause the project to be rebuilt.
+     *
      * @since 3.11
      */
     @Parameter
-    private Set<String> testIncrementalExcludes = new HashSet<>();
+    protected Set<String> testIncrementalExcludes;
 
     /**
-     * The -source argument for the test Java compiler.
+     * The {@code --source} argument for the test Java compiler.
      *
      * @since 2.1
      */
     @Parameter(property = "maven.compiler.testSource")
-    private String testSource;
+    protected String testSource;
 
     /**
-     * The -target argument for the test Java compiler.
+     * The {@code --target} argument for the test Java compiler.
      *
      * @since 2.1
      */
     @Parameter(property = "maven.compiler.testTarget")
-    private String testTarget;
+    protected String testTarget;
 
     /**
-     * the -release argument for the test Java compiler
+     * the {@code --release} argument for the test Java compiler
      *
      * @since 3.6
      */
     @Parameter(property = "maven.compiler.testRelease")
-    private String testRelease;
+    protected String testRelease;
 
     /**
-     * <p>
-     * Sets the arguments to be passed to test compiler (prepending a dash) if fork is set to true.
-     * </p>
-     * <p>
-     * This is because the list of valid arguments passed to a Java compiler
-     * varies based on the compiler version.
-     * </p>
+     * The arguments to be passed to the test compiler.
+     * If this parameter is specified, it replaces {@link #compilerArgs}.
+     * Otherwise, the {@code compilerArgs} parameter is used.
+     *
+     * @since 4.0.0
+     */
+    @Parameter
+    private List<String> testCompilerArgs;
+
+    /**
+     * The arguments to be passed to test compiler.
+     *
+     * @deprecated Replaced by {@link #testCompilerArgs} for consistency with the main goal.
      *
      * @since 2.1
      */
     @Parameter
+    @Deprecated(since = "4.0.0")
     private Map<String, String> testCompilerArguments;
 
     /**
-     * <p>
-     * Sets the unformatted argument string to be passed to test compiler if fork is set to true.
-     * </p>
-     * <p>
-     * This is because the list of valid arguments passed to a Java compiler
-     * varies based on the compiler version.
-     * </p>
+     * The single argument string to be passed to the test compiler.
+     * If this parameter is specified, it replaces {@link #compilerArgument}.
+     * Otherwise, the {@code compilerArgument} parameter is used.
      *
      * @since 2.1
+     *
+     * @deprecated Use {@link #testCompilerArguments} instead.
      */
     @Parameter
+    @Deprecated(since = "4.0.0")
     private String testCompilerArgument;
 
     /**
-     * <p>
      * Specify where to place generated source files created by annotation processing.
      * Only applies to JDK 1.6+
-     * </p>
      *
      * @since 2.2
      */
     @Parameter(defaultValue = "${project.build.directory}/generated-test-sources/test-annotations")
     private Path generatedTestSourcesDirectory;
 
-    @Parameter
-    private List<String> testPath;
-
     /**
-     * when forking and debug activated the commandline used will be dumped in this file
+     * The file where to dump the command-line when debug is activated or when the compilation failed.
+     * For example, if the value is {@code "javac-test.txt"}, then the Java compiler can be launched
+     * from the command-line by typing {@code javac @target/javac-test.txt}.
+     * The debug file will contain the compiler options together with the list of source files to compile.
+     *
      * @since 3.10.0
      */
-    @Parameter(defaultValue = "javac-test")
+    @Parameter(defaultValue = "javac-test.txt")
     private String debugFileName;
 
-    final LocationManager locationManager = new LocationManager();
+    /**
+     * Creates a new test compiler MOJO.
+     */
+    public TestCompilerMojo() {
+        super(true);
+    }
 
-    private Map<String, JavaModuleDescriptor> pathElements;
-
-    private List<String> classpathElements;
-
-    private List<String> modulepathElements;
-
+    /**
+     * Runs the Java compiler on the test source code.
+     *
+     * @throws MojoException if the compiler cannot be run.
+     */
+    @Override
     public void execute() throws MojoException {
         if (skip) {
-            getLog().info("Not compiling test sources");
+            logger.info("Not compiling test sources");
             return;
         }
+        reportDeprecatedParameter("testCompilerArgument", testCompilerArgument, "testCompilerArgs", null);
+        reportDeprecatedParameter("testCompilerArguments", testCompilerArguments, "testCompilerArgs", null);
         super.execute();
     }
 
+    /**
+     * {@return the root directories of Java source files to compile for the tests}.
+     */
+    @Nonnull
+    @Override
     protected List<Path> getCompileSourceRoots() {
         if (compileSourceRoots == null || compileSourceRoots.isEmpty()) {
-            return projectManager.getCompileSourceRoots(getProject(), ProjectScope.TEST);
+            return projectManager.getCompileSourceRoots(project, ProjectScope.TEST);
         } else {
             return compileSourceRoots.stream().map(Paths::get).collect(Collectors.toList());
         }
     }
 
+    /**
+     * {@return the inclusion filters for the compiler, or an empty set for all Java source files}.
+     */
     @Override
-    protected Map<String, JavaModuleDescriptor> getPathElements() {
-        return pathElements;
+    protected Set<String> getIncludes() {
+        return (testIncludes != null) ? testIncludes : Set.of();
     }
 
-    protected List<String> getClasspathElements() {
-        return classpathElements;
-    }
-
+    /**
+     * {@return the exclusion filters for the compiler, or an empty set if none}.
+     */
     @Override
-    protected List<String> getModulepathElements() {
-        return modulepathElements;
+    protected Set<String> getExcludes() {
+        return (testExcludes != null) ? testExcludes : Set.of();
     }
 
+    /**
+     * {@return the exclusion filters for the incremental calculation, or an empty set if none}.
+     */
+    @Override
+    protected Set<String> getIncrementalExcludes() {
+        return (testIncrementalExcludes != null) ? testIncrementalExcludes : Set.of();
+    }
+
+    /**
+     * {@return the destination directory for test class files}.
+     */
+    @Nonnull
+    @Override
     protected Path getOutputDirectory() {
         return outputDirectory;
     }
 
+    /**
+     * If a different source version has been specified for the tests, returns that version.
+     * Otherwise returns the same source version as the main code.
+     *
+     * @return the {@code --source} argument for the Java compiler
+     */
+    @Nullable
     @Override
-    protected void preparePaths(Set<Path> sourceFiles) {
-        List<String> testPath = this.testPath;
-        if (testPath == null) {
-            Stream<String> s1 = Stream.of(outputDirectory.toString(), mainOutputDirectory.toString());
-            Stream<String> s2 = session.resolveDependencies(getProject(), PathScope.TEST_COMPILE).stream()
-                    .map(Path::toString);
-            testPath = Stream.concat(s1, s2).collect(Collectors.toList());
-        }
-
-        Path mainOutputDirectory = Paths.get(getProject().getBuild().getOutputDirectory());
-
-        Path mainModuleDescriptorClassFile = mainOutputDirectory.resolve("module-info.class");
-        JavaModuleDescriptor mainModuleDescriptor = null;
-
-        Path testModuleDescriptorJavaFile = Paths.get("module-info.java");
-        JavaModuleDescriptor testModuleDescriptor = null;
-
-        // Go through the source files to respect includes/excludes
-        for (Path sourceFile : sourceFiles) {
-            // @todo verify if it is the root of a sourcedirectory?
-            if ("module-info.java".equals(sourceFile.getFileName().toString())) {
-                testModuleDescriptorJavaFile = sourceFile;
-                break;
-            }
-        }
-
-        // Get additional information from the main module descriptor, if available
-        if (Files.exists(mainModuleDescriptorClassFile)) {
-            ResolvePathsResult<String> result;
-
-            try {
-                ResolvePathsRequest<String> request = ResolvePathsRequest.ofStrings(testPath)
-                        .setIncludeStatic(true)
-                        .setMainModuleDescriptor(
-                                mainModuleDescriptorClassFile.toAbsolutePath().toString());
-
-                Optional<Toolchain> toolchain = getToolchain();
-                if (toolchain.isPresent() && toolchain.get() instanceof JavaToolchain) {
-                    request.setJdkHome(((JavaToolchain) toolchain.get()).getJavaHome());
-                }
-
-                result = locationManager.resolvePaths(request);
-
-                for (Entry<String, Exception> pathException :
-                        result.getPathExceptions().entrySet()) {
-                    Throwable cause = pathException.getValue();
-                    while (cause.getCause() != null) {
-                        cause = cause.getCause();
-                    }
-                    String fileName =
-                            Paths.get(pathException.getKey()).getFileName().toString();
-                    getLog().warn("Can't extract module name from " + fileName + ": " + cause.getMessage());
-                }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-
-            mainModuleDescriptor = result.getMainModuleDescriptor();
-
-            pathElements = new LinkedHashMap<>(result.getPathElements().size());
-            pathElements.putAll(result.getPathElements());
-
-            modulepathElements = new ArrayList<>(result.getModulepathElements().keySet());
-            classpathElements = new ArrayList<>(result.getClasspathElements());
-        }
-
-        // Get additional information from the test module descriptor, if available
-        if (Files.exists(testModuleDescriptorJavaFile)) {
-            ResolvePathsResult<String> result;
-
-            try {
-                ResolvePathsRequest<String> request = ResolvePathsRequest.ofStrings(testPath)
-                        .setMainModuleDescriptor(
-                                testModuleDescriptorJavaFile.toAbsolutePath().toString());
-
-                Optional<Toolchain> toolchain = getToolchain();
-                if (toolchain.isPresent() && toolchain.get() instanceof JavaToolchain) {
-                    request.setJdkHome(((JavaToolchain) toolchain.get()).getJavaHome());
-                }
-
-                result = locationManager.resolvePaths(request);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-
-            testModuleDescriptor = result.getMainModuleDescriptor();
-        }
-
-        if (release != null) {
-            if (Integer.parseInt(release) < 9) {
-                pathElements = Collections.emptyMap();
-                modulepathElements = Collections.emptyList();
-                classpathElements = testPath;
-                return;
-            }
-        } else if (Double.parseDouble(getTarget()) < Double.parseDouble(MODULE_INFO_TARGET)) {
-            pathElements = Collections.emptyMap();
-            modulepathElements = Collections.emptyList();
-            classpathElements = testPath;
-            return;
-        }
-
-        if (testModuleDescriptor != null) {
-            modulepathElements = testPath;
-            classpathElements = Collections.emptyList();
-
-            if (mainModuleDescriptor != null) {
-                if (getLog().isDebugEnabled()) {
-                    getLog().debug("Main and test module descriptors exist:");
-                    getLog().debug("  main module = " + mainModuleDescriptor.name());
-                    getLog().debug("  test module = " + testModuleDescriptor.name());
-                }
-
-                if (testModuleDescriptor.name().equals(mainModuleDescriptor.name())) {
-                    if (compilerArgs == null) {
-                        compilerArgs = new ArrayList<>();
-                    }
-                    compilerArgs.add("--patch-module");
-
-                    StringBuilder patchModuleValue = new StringBuilder();
-                    patchModuleValue.append(testModuleDescriptor.name());
-                    patchModuleValue.append('=');
-
-                    for (Path root : projectManager.getCompileSourceRoots(getProject(), ProjectScope.MAIN)) {
-                        if (Files.exists(root)) {
-                            patchModuleValue.append(root).append(PS);
-                        }
-                    }
-
-                    compilerArgs.add(patchModuleValue.toString());
-                } else {
-                    getLog().debug("Black-box testing - all is ready to compile");
-                }
-            } else {
-                // No main binaries available? Means we're a test-only project.
-                if (!Files.exists(mainOutputDirectory)) {
-                    return;
-                }
-                // very odd
-                // Means that main sources must be compiled with -modulesource and -Xmodule:<moduleName>
-                // However, this has a huge impact since you can't simply use it as a classpathEntry
-                // due to extra folder in between
-                throw new UnsupportedOperationException(
-                        "Can't compile test sources " + "when main sources are missing a module descriptor");
-            }
-        } else {
-            if (mainModuleDescriptor != null) {
-                if (compilerArgs == null) {
-                    compilerArgs = new ArrayList<>();
-                }
-                compilerArgs.add("--patch-module");
-
-                StringBuilder patchModuleValue = new StringBuilder(mainModuleDescriptor.name())
-                        .append('=')
-                        .append(mainOutputDirectory)
-                        .append(PS);
-                for (Path root : getCompileSourceRoots()) {
-                    patchModuleValue.append(root).append(PS);
-                }
-
-                compilerArgs.add(patchModuleValue.toString());
-
-                compilerArgs.add("--add-reads");
-                compilerArgs.add(mainModuleDescriptor.name() + "=ALL-UNNAMED");
-            } else {
-                modulepathElements = Collections.emptyList();
-                classpathElements = testPath;
-            }
-        }
-    }
-
-    protected SourceInclusionScanner getSourceInclusionScanner(int staleMillis) {
-        SourceInclusionScanner scanner;
-
-        if (testIncludes.isEmpty() && testExcludes.isEmpty() && testIncrementalExcludes.isEmpty()) {
-            scanner = new StaleSourceScanner(staleMillis);
-        } else {
-            if (testIncludes.isEmpty()) {
-                testIncludes.add("**/*.java");
-            }
-            Set<String> excludesIncr = new HashSet<>(testExcludes);
-            excludesIncr.addAll(this.testIncrementalExcludes);
-            scanner = new StaleSourceScanner(staleMillis, testIncludes, excludesIncr);
-        }
-
-        return scanner;
-    }
-
-    protected SourceInclusionScanner getSourceInclusionScanner(String inputFileEnding) {
-        SourceInclusionScanner scanner;
-
-        // it's not defined if we get the ending with or without the dot '.'
-        String defaultIncludePattern = "**/*" + (inputFileEnding.startsWith(".") ? "" : ".") + inputFileEnding;
-
-        if (testIncludes.isEmpty() && testExcludes.isEmpty() && testIncrementalExcludes.isEmpty()) {
-            testIncludes = Collections.singleton(defaultIncludePattern);
-            scanner = new SimpleSourceInclusionScanner(testIncludes, Collections.emptySet());
-        } else {
-            if (testIncludes.isEmpty()) {
-                testIncludes.add(defaultIncludePattern);
-            }
-            Set<String> excludesIncr = new HashSet<>(testExcludes);
-            excludesIncr.addAll(this.testIncrementalExcludes);
-            scanner = new SimpleSourceInclusionScanner(testIncludes, excludesIncr);
-        }
-
-        return scanner;
-    }
-
     protected String getSource() {
         return testSource == null ? source : testSource;
     }
 
+    /**
+     * If a different target version has been specified for the tests, returns that version.
+     * Otherwise returns the same target version as the main code.
+     *
+     * @return the {@code --target} argument for the Java compiler
+     */
+    @Nullable
+    @Override
     protected String getTarget() {
         return testTarget == null ? target : testTarget;
     }
 
+    /**
+     * If a different release version has been specified for the tests, returns that version.
+     * Otherwise returns the same release version as the main code.
+     *
+     * @return the {@code --release} argument for the Java compiler
+     */
+    @Nullable
     @Override
     protected String getRelease() {
         return testRelease == null ? release : testRelease;
     }
 
-    protected String getCompilerArgument() {
-        return testCompilerArgument == null ? compilerArgument : testCompilerArgument;
+    /**
+     * Adds compiler arguments to the given set of options.
+     *
+     * @param addTo where to add the compiler arguments
+     */
+    @Override
+    void addCompilerArguments(Options addTo) {
+        addTo.addUnchecked(testCompilerArgs == null || testCompilerArgs.isEmpty() ? compilerArgs : testCompilerArgs);
+        for (Map.Entry<String, String> entry : testCompilerArguments.entrySet()) {
+            addTo.addUnchecked(List.of(entry.getKey(), entry.getValue()));
+        }
+        addTo.addUnchecked(testCompilerArgument == null ? compilerArgument : testCompilerArgument);
     }
 
+    /**
+     * {@return the path where to place generated source files created by annotation processing on the test classes}.
+     */
+    @Nullable
+    @Override
     protected Path getGeneratedSourcesDirectory() {
         return generatedTestSourcesDirectory;
     }
 
+    /**
+     * {@return the file where to dump the command-line when debug is activated or when the compilation failed}.
+     */
+    @Nullable
     @Override
     protected String getDebugFileName() {
         return debugFileName;
-    }
-
-    @Override
-    protected boolean isTestCompile() {
-        return true;
-    }
-
-    @Override
-    protected Set<String> getIncludes() {
-        return testIncludes;
-    }
-
-    @Override
-    protected Set<String> getExcludes() {
-        return testExcludes;
     }
 }

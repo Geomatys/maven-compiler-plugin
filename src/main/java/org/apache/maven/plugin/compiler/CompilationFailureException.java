@@ -18,60 +18,23 @@
  */
 package org.apache.maven.plugin.compiler;
 
-import java.util.List;
-
 import org.apache.maven.api.plugin.MojoException;
-import org.codehaus.plexus.compiler.CompilerMessage;
 
 /**
- * @author <a href="mailto:jason@maven.org">Jason van Zyl</a>
+ * Thrown when the Java compiler cannot complete the project compilation.
+ *
+ * @author Jason van Zyl
  * @since 2.0
  */
 @SuppressWarnings("serial")
 public class CompilationFailureException extends MojoException {
-    private static final String LS = System.getProperty("line.separator");
-
     /**
-     * Wrap error messages from the compiler
+     * Creates a new exception with the given message and cause.
      *
-     * @param messages the messages, not null
-     * @since 2.0
+     * @param message the short message
+     * @param cause the cause of the failure, or {@code null} if none
      */
-    public CompilationFailureException(List<CompilerMessage> messages) {
-        super(null, shortMessage(messages), longMessage(messages));
-    }
-
-    /**
-     * Long message will have all messages, one per line
-     *
-     * @param messages the messages, not null
-     * @return the long error message
-     * @since 2.0
-     */
-    public static String longMessage(List<CompilerMessage> messages) {
-        StringBuilder sb = new StringBuilder();
-
-        for (CompilerMessage compilerError : messages) {
-            sb.append(compilerError).append(LS);
-        }
-
-        return sb.toString();
-    }
-
-    /**
-     * Short message will have the error message if there's only one, useful for errors forking the compiler
-     *
-     * @param messages the messages, not null
-     * @return the short error message
-     * @since 2.0.2
-     */
-    public static String shortMessage(List<CompilerMessage> messages) {
-        StringBuilder sb = new StringBuilder("Compilation failure");
-
-        if (messages.size() == 1) {
-            sb.append(LS).append(messages.get(0)).append(LS);
-        }
-
-        return sb.toString();
+    public CompilationFailureException(String message, Throwable cause) {
+        super(message, cause);
     }
 }
