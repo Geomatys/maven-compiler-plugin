@@ -20,8 +20,6 @@ package com.mycompany.jdk16annotation;
 
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.RoundEnvironment;
-import javax.annotation.processing.SupportedSourceVersion;
-import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
 import javax.tools.Diagnostic.Kind;
@@ -36,7 +34,6 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-@SupportedSourceVersion(SourceVersion.RELEASE_6)
 public class ServiceProviderProcessor extends AbstractProcessor {
 
     public @Override Set<String> getSupportedAnnotationTypes() {
@@ -81,7 +78,6 @@ public class ServiceProviderProcessor extends AbstractProcessor {
                 osr.close();
                 os.close();
             }
-
         } catch (IOException x) {
             processingEnv.getMessager().printMessage(Kind.ERROR, "Failed to write to one: " + x.toString());
         }
