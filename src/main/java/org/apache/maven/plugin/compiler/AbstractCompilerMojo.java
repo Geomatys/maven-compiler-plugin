@@ -18,6 +18,7 @@
  */
 package org.apache.maven.plugin.compiler;
 
+import javax.lang.model.SourceVersion;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileManager;
 import javax.tools.JavaFileObject;
@@ -157,6 +158,10 @@ public abstract class AbstractCompilerMojo implements Mojo {
             } catch (UnsupportedCharsetException e) {
                 throw new CompilationFailureException("Invalid 'encoding' option: " + encoding, e);
             }
+        } else if (SourceVersion.latestSupported().compareTo(SourceVersion.RELEASE_17) <= 0) {
+            logger.warn("File encoding has not been set, using platform encoding "
+                    + Charset.defaultCharset().name()
+                    + ", i.e. build is platform dependent!");
         }
         return null;
     }

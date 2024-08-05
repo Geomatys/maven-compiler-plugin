@@ -27,6 +27,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -376,7 +377,7 @@ public class TestCompilerMojo extends AbstractCompilerMojo {
      * @throws IOException if the module information of a dependency cannot be read
      */
     @Override
-    @SuppressWarnings("checkstyle:MissingSwitchDefault")
+    @SuppressWarnings({"checkstyle:MissingSwitchDefault", "fallthrough"})
     protected void addModuleOptions(DependencyResolverResult dependencies, Options addTo) throws IOException {
         if (hasTestModuelInfo) {
             /*
@@ -385,38 +386,54 @@ public class TestCompilerMojo extends AbstractCompilerMojo {
              */
             return;
         }
+        final var done = new HashSet<String>(); // Added modules and their dependencies.
+        final var addModules = new StringJoiner(",");
         StringJoiner addReads = null;
-        StringJoiner addModules = null;
         boolean hasUnnamed = false;
         for (Map.Entry<Dependency, Path> entry : dependencies.getDependencies().entrySet()) {
+            boolean compile = false;
             switch (entry.getKey().getScope()) {
                 case TEST:
                 case TEST_ONLY:
-                    // TODO: we could exclude transitive dependencies.
-                    if (addReads == null) {
-                        addReads = new StringJoiner(",", getModuleName() + "=", "");
-                    }
-                    String depName =
-                            dependencies.getModuleName(entry.getValue()).orElse(null);
-                    if (depName != null) {
-                        if (addModules == null) {
-                            addModules = new StringJoiner(",");
+                    compile = true;
+                    // Fall through
+                case TEST_RUNTIME:
+                    if (compile) {
+                        // Needs to be initialized even if `name` is null.
+                        if (addReads == null) {
+                            addReads = new StringJoiner(",", getModuleName() + "=", "");
                         }
-                        addModules.add(depName);
-                        addReads.add(depName);
-                    } else {
+                    }
+                    Path path = entry.getValue();
+                    String name = dependencies.getModuleName(path).orElse(null);
+                    if (name == null) {
                         hasUnnamed = true;
+                    } else if (done.add(name)) {
+                        addModules.add(name);
+                        if (compile) {
+                            addReads.add(name);
+                        }
+                        /*
+                         * For making the options simpler, we do not add `--add-modules` or `--add-reads`
+                         * options for modules that are required by a module that we already added. This
+                         * simplification is not necessary, but makes the command-line easier to read.
+                         */
+                        dependencies.getModuleDescriptor(path).ifPresent((descriptor) -> {
+                            for (ModuleDescriptor.Requires r : descriptor.requires()) {
+                                done.add(r.name());
+                            }
+                        });
                     }
                     break;
             }
         }
-        if (addModules != null) {
+        if (!done.isEmpty()) {
             addTo.addIfNonBlank("--add-modules", addModules.toString());
         }
-        if (hasUnnamed) {
-            addReads.add("ALL-UNNAMED");
-        }
         if (addReads != null) {
+            if (hasUnnamed) {
+                addReads.add("ALL-UNNAMED");
+            }
             addTo.addIfNonBlank("--add-reads", addReads.toString());
         }
     }
