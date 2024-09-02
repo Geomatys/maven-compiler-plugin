@@ -115,11 +115,6 @@ under the License.
       <version>${mavenVersion}</version>
       <scope>provided</scope>
     </dependency>
-    <dependency>
-      <groupId>org.ow2.asm</groupId>
-      <artifactId>asm</artifactId>
-      <version>${asmVersion}</version>
-    </dependency>
 
     <dependency>
       <groupId>org.apache.maven</groupId>

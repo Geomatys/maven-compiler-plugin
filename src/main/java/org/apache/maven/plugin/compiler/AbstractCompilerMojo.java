@@ -1414,24 +1414,6 @@ public abstract class AbstractCompilerMojo implements Mojo {
                     .ifPresent((c) -> message.append(System.lineSeparator()).append(c));
             throw new CompilationFailureException(message.toString(), failureCause);
         }
-        // if Reproducible Builds mode, apply workaround
-        if (outputTimestamp != null
-                && !outputTimestamp.isEmpty()
-                && (outputTimestamp.length() > 1 || Character.isDigit(outputTimestamp.charAt(0)))) {
-            Path moduleDescriptor = getOutputDirectory().resolve("module-info.class");
-            if (Files.isRegularFile(moduleDescriptor)) {
-                try {
-                    final byte[] descriptorOriginal = Files.readAllBytes(moduleDescriptor);
-                    final byte[] descriptorMod =
-                            ByteCodeTransformer.patchJdkModuleVersion(descriptorOriginal, getRelease(), logger);
-                    if (descriptorMod != null) {
-                        Files.write(moduleDescriptor, descriptorMod);
-                    }
-                } catch (IOException ex) {
-                    throw new MojoException("Error reading or writing module-info.class", ex);
-                }
-            }
-        }
     }
 
     /**
