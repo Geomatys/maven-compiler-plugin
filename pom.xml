@@ -82,7 +82,7 @@ under the License.
 
   <properties>
     <javaVersion>17</javaVersion>
-    <mavenVersion>4.0.0-beta-4</mavenVersion>
+    <mavenVersion>4.0.0-beta-5-SNAPSHOT</mavenVersion>
 
     <asmVersion>9.7</asmVersion>
     <groovyVersion>2.4.21</groovyVersion>
