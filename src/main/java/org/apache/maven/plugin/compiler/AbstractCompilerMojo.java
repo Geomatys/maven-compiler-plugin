@@ -1234,7 +1234,7 @@ public abstract class AbstractCompilerMojo implements Mojo {
          * and this MOJO is compiling the main code, then a warning will be logged.
          *
          * NOTE: this method assumes that the map and the list values are modifiable.
-         * This is true with org.apache.maven.internal.impl.DefaultDependencyResolverResult,
+         * This is true with org.apache.maven.impl.DefaultDependencyResolverResult,
          * but may not be true in the general case. To be safe, we should perform a deep copy.
          * But it would be unnecessary copies in most cases.
          */
@@ -1619,7 +1619,7 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * to the {@link JavaPathType#PROCESSOR_CLASSES} entry of given map, which should be modifiable.
      *
      * <h4>Implementation note</h4>
-     * We rely on the fact that {@link org.apache.maven.internal.impl.DefaultDependencyResolverResult} creates
+     * We rely on the fact that {@link org.apache.maven.impl.DefaultDependencyResolverResult} creates
      * modifiable instances of map and lists. This is a fragile assumption, but this method is deprecated anyway
      * and may be removed in a future version.
      *
