@@ -1820,7 +1820,8 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * @return the given path, potentially relative to the base directory
      */
     private Path relativize(Path file) {
-        if (file.startsWith(project.getRootDirectory())) {
+        Path root = project.getRootDirectory();
+        if (root != null && file.startsWith(root)) {
             try {
                 file = basedir.relativize(file);
             } catch (IllegalArgumentException e) {
