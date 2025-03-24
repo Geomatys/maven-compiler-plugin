@@ -531,8 +531,8 @@ public abstract class AbstractCompilerMojo implements Mojo {
 
     /**
      * The algorithm to use for selecting which files to compile.
-     * Values can be {@code dependencies}, {@code sources}, {@code classes}, {@code additions},
-     * {@code modules} or {@code none}.
+     * Values can be {@code dependencies}, {@code sources}, {@code classes}, {@code rebuild-on-change},
+     * {@code rebuild-on-add}, {@code modules} or {@code none}.
      *
      * <p><b>{@code options}:</b>
      * recompile all source files if the compiler options changed.
@@ -557,18 +557,24 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * <p>The {@code sources} and {@code classes} values are partially redundant,
      * doing the same work in different ways. It is usually not necessary to specify those two values.</p>
      *
-     * <p><b>{@code additions}:</b>
-     * recompile all source files when the addition of a new file is detected.
-     * This aspect should be used together with {@code sources} or {@code classes}.
-     * When used with {@code classes}, it provides a way to detect class renaming
-     * (this is not needed with {@code sources}).</p>
-     *
      * <p><b>{@code modules}:</b>
      * recompile modules and let the compiler decides which individual files to recompile.
      * The compiler plugin does not enumerate the source files to recompile (actually, it does not scan at all the
      * source directories). Instead, it only specifies the module to recompile using the {@code --module} option.
      * The Java compiler will scan the source directories itself and compile only those source files that are newer
      * than the corresponding files in the output directory.</p>
+     *
+     * <p><b>{@code rebuild-on-add}:</b>
+     * modifier for recompiling all source files when the addition of a new file is detected.
+     * This flag is effective only when used together with {@code sources} or {@code classes}.
+     * When used with {@code classes}, it provides a way to detect class renaming
+     * (this is not needed with {@code sources} for detecting renaming).</p>
+     *
+     * <p><b>{@code rebuild-on-change}:</b>
+     * modifier for recompiling all source files when a change is detected in at least one source file.
+     * This flag is effective only when used together with {@code sources} or {@code classes}.
+     * It does not rebuild when a new source file is added without change in other files,
+     * unless {@code rebuild-on-add} is also specified.</p>
      *
      * <p><b>{@code none}:</b>
      * the compiler plugin unconditionally specifies all sources to the Java compiler.
@@ -593,7 +599,7 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * @since 3.1
      *
      * @deprecated Replaced by {@link #incrementalCompilation}.
-     * A value of {@code true} in this old property is equivalent to {@code "dependencies,sources,additions"}
+     * A value of {@code true} in this old property is equivalent to {@code "dependencies,sources,rebuild-on-add"}
      * in the new property, and a value of {@code false} is equivalent to {@code "classes"}.
      */
     @Deprecated(since = "4.0.0")
@@ -610,9 +616,9 @@ public abstract class AbstractCompilerMojo implements Mojo {
         if (useIncrementalCompilation != null) {
             return useIncrementalCompilation
                     ? EnumSet.of(
+                            IncrementalBuild.Aspect.DEPENDENCIES,
                             IncrementalBuild.Aspect.SOURCES,
-                            IncrementalBuild.Aspect.ADDITIONS,
-                            IncrementalBuild.Aspect.DEPENDENCIES)
+                            IncrementalBuild.Aspect.REBUILD_ON_ADD)
                     : EnumSet.of(IncrementalBuild.Aspect.CLASSES);
         } else {
             return IncrementalBuild.Aspect.parse(incrementalCompilation);

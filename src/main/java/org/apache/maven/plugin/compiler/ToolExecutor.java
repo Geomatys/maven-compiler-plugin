@@ -287,17 +287,15 @@ public class ToolExecutor {
         final boolean checkClasses = incrementalCompilation.contains(IncrementalBuild.Aspect.CLASSES);
         final boolean checkDepends = incrementalCompilation.contains(IncrementalBuild.Aspect.DEPENDENCIES);
         final boolean checkOptions = incrementalCompilation.contains(IncrementalBuild.Aspect.OPTIONS);
-        final boolean rebuildOnAdd = incrementalCompilation.contains(IncrementalBuild.Aspect.ADDITIONS);
-        incrementalCompilation.clear(); // Prevent this method to be executed twice.
         if (checkSources | checkClasses | checkDepends | checkOptions) {
-            final var incrementalBuild = new IncrementalBuild(mojo, sourceFiles);
+            final var incrementalBuild = new IncrementalBuild(mojo, sourceFiles, incrementalCompilation);
             String causeOfRebuild = null;
             if (checkSources) {
                 // Should be first, because this method deletes output files of removed sources.
-                causeOfRebuild = incrementalBuild.inputFileTreeChanges(mojo.staleMillis, rebuildOnAdd);
+                causeOfRebuild = incrementalBuild.inputFileTreeChanges();
             }
             if (checkClasses && causeOfRebuild == null) {
-                causeOfRebuild = incrementalBuild.markNewOrModifiedSources(mojo.staleMillis, rebuildOnAdd);
+                causeOfRebuild = incrementalBuild.markNewOrModifiedSources();
             }
             if (checkDepends && causeOfRebuild == null) {
                 List<String> fileExtensions = mojo.fileExtensions;
@@ -314,10 +312,13 @@ public class ToolExecutor {
                 }
             }
             if (causeOfRebuild != null) {
-                logger.info(causeOfRebuild);
+                if (!sourceFiles.isEmpty()) { // Avoid misleading message such as "all sources changed".
+                    logger.info(causeOfRebuild);
+                }
             } else {
                 sourceFiles = incrementalBuild.getModifiedSources();
                 if (IncrementalBuild.isEmptyOrIgnorable(sourceFiles)) {
+                    incrementalCompilation.clear(); // Prevent this method to be executed twice.
                     logger.info("Nothing to compile - all classes are up to date.");
                     sourceFiles = List.of();
                     return false;
@@ -334,6 +335,7 @@ public class ToolExecutor {
                 incrementalBuild.writeCache(optionsHash, checkSources);
             }
         }
+        incrementalCompilation.clear(); // Prevent this method to be executed twice.
         return true;
     }
 
