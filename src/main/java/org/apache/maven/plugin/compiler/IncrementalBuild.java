@@ -329,7 +329,7 @@ final class IncrementalBuild {
                     final Path sourceFile = source.file;
                     final Path outputFile = source.getOutputFile(false);
                     boolean sameSrcDir = Objects.equals(srcDir, srcDir = source.directory.root);
-                    boolean sameTgtDir = Objects.equals(tgtDir, tgtDir = source.directory.outputDirectory);
+                    boolean sameTgtDir = Objects.equals(tgtDir, tgtDir = source.directory.getOutputDirectory());
                     boolean sameOutput = (outputFile == null)
                             || outputFile.equals(SourceInfo.toOutputFile(srcDir, tgtDir, sourceFile));
 

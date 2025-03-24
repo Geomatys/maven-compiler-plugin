@@ -281,6 +281,9 @@ class ToolExecutorForTest extends ToolExecutor {
                 break;
             }
         }
+        if (files.isEmpty()) {
+            return new CompilationTaskSources[0];
+        }
         var task = new CompilationTaskSources(files) {
             /**
              * Substitutes the main {@code module-info.class} by the test's one, compiles test classes,

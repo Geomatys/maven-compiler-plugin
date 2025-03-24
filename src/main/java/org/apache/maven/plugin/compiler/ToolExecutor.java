@@ -18,6 +18,7 @@
  */
 package org.apache.maven.plugin.compiler;
 
+import javax.lang.model.SourceVersion;
 import javax.tools.DiagnosticListener;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileManager;
@@ -34,8 +35,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -127,6 +131,13 @@ public class ToolExecutor {
     protected final Map<PathType, List<Path>> dependencies;
 
     /**
+     * The classpath given to the compiler. Stored for making possible to prepend the paths
+     * of the compilation results of previous versions in a multi-version JAR file.
+     * This list needs to be modifiable.
+     */
+    private List<Path> classpath;
+
+    /**
      * The destination directory (or class output directory) for class files.
      * This directory will be given to the {@code -d} Java compiler option
      * when compiling the classes for the base Java release.
@@ -153,6 +164,9 @@ public class ToolExecutor {
      * The Maven logger for reporting information or warnings to the user.
      * Used for messages emitted directly by the Maven compiler plugin.
      * Not necessarily used for messages emitted by the Java compiler.
+     *
+     * <h4>Thread safety</h4>
+     * This logger should be thread-safe if this {@code ToolExecutor} is executed in a background thread.
      *
      * @see AbstractCompilerMojo#logger
      */
@@ -240,6 +254,18 @@ public class ToolExecutor {
     }
 
     /**
+     * {@return whether a release version is specified for all sources}.
+     */
+    final boolean isReleaseSpecifiedForAll() {
+        for (SourceDirectory source : sourceDirectories) {
+            if (source.release == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * Filters the source files to recompile, or cleans the output directory if everything should be rebuilt.
      * If the directory structure of the source files has changed since the last build,
      * or if a compiler option changed, or if a dependency changed,
@@ -295,6 +321,13 @@ public class ToolExecutor {
                     logger.info("Nothing to compile - all classes are up to date.");
                     sourceFiles = List.of();
                     return false;
+                } else {
+                    int n = sourceFiles.size();
+                    var sb = new StringBuilder("Compiling ").append(n).append(" modified source file");
+                    if (n > 1) {
+                        sb.append('s'); // Make plural.
+                    }
+                    logger.info(sb.append('.'));
                 }
             }
             if (checkSources | checkDepends | checkOptions) {
@@ -302,6 +335,94 @@ public class ToolExecutor {
             }
         }
         return true;
+    }
+
+    /**
+     * Dispatches all dependencies on the kind of paths determined by {@code DependencyResolver}.
+     * The targets may be class-path, module-path, annotation processor class-path/module-path,
+     * <i>etc</i>.
+     *
+     * @param fileManager the file manager where to set the dependency paths
+     */
+    private void setDependencyPaths(StandardJavaFileManager fileManager) throws IOException {
+        final var unresolvedPaths = new ArrayList<Path>();
+        for (Map.Entry<PathType, List<Path>> entry : dependencies.entrySet()) {
+            List<Path> paths = entry.getValue();
+            PathType key = entry.getKey();
+            if (key instanceof JavaPathType type) {
+                Optional<JavaFileManager.Location> location = type.location();
+                if (location.isPresent()) { // Cannot use `Optional.ifPresent(…)` because of checked IOException.
+                    var value = location.get();
+                    fileManager.setLocationFromPaths(value, paths);
+                    if (value == StandardLocation.CLASS_PATH) {
+                        classpath = new ArrayList<>(paths); // Need a modifiable list.
+                    }
+                    continue;
+                }
+            } else if (key instanceof JavaPathType.Modular type) {
+                Optional<JavaFileManager.Location> location = type.rawType().location();
+                if (location.isPresent()) {
+                    try {
+                        fileManager.setLocationForModule(location.get(), type.moduleName(), paths);
+                    } catch (UnsupportedOperationException e) { // Happen with `PATCH_MODULE_PATH`.
+                        var it = Arrays.asList(type.option(paths)).iterator();
+                        if (!fileManager.handleOption(it.next(), it) || it.hasNext()) {
+                            throw new CompilationFailureException("Cannot handle " + type, e);
+                        }
+                    }
+                    continue;
+                }
+            }
+            unresolvedPaths.addAll(paths);
+        }
+        if (!unresolvedPaths.isEmpty()) {
+            var sb = new StringBuilder("Cannot determine where to place the following artifacts:");
+            for (Path p : unresolvedPaths) {
+                sb.append(System.lineSeparator()).append(" - ").append(p);
+            }
+            logger.warn(sb);
+        }
+    }
+
+    /**
+     * Ensures that the given value is non-null, replacing null values by the latest version.
+     */
+    private static SourceVersion nonNull(SourceVersion release) {
+        return (release != null) ? release : SourceVersion.latest();
+    }
+
+    /**
+     * Ensures that the given value is non-null, replacing null or blank values by an empty string.
+     */
+    private static String nonNull(String moduleName) {
+        return (moduleName == null || moduleName.isBlank()) ? "" : moduleName;
+    }
+
+    /**
+     * Groups all sources files first by Java release versions, then by module names.
+     * The elements are sorted in the order of {@link SourceVersion} enumeration values,
+     * with null version sorted last on the assumption that they will be for the latest
+     * version supported by the runtime environment.
+     *
+     * @return the given sources grouped by Java release versions and module names
+     */
+    private Collection<SourcesForRelease> groupByReleaseAndModule() {
+        var result = new EnumMap<SourceVersion, SourcesForRelease>(SourceVersion.class);
+        for (SourceDirectory directory : sourceDirectories) {
+            /*
+             * We need an entry for every versions even if there is no source to compile for a version.
+             * This is needed for configuring the classpath in a consistent way, for example with the
+             * output directory of previous version even if we skipped the compilation of that version.
+             */
+            SourcesForRelease unit = result.computeIfAbsent(
+                    nonNull(directory.release),
+                    (release) -> new SourcesForRelease(directory.release)); // Intentionally ignore the key.
+            unit.roots.computeIfAbsent(nonNull(directory.moduleName), (moduleName) -> new LinkedHashSet<Path>());
+        }
+        for (SourceFile source : sourceFiles) {
+            result.get(nonNull(source.directory.release)).add(source);
+        }
+        return result.values();
     }
 
     /**
@@ -315,9 +436,12 @@ public class ToolExecutor {
      * @throws MojoException if the compilation failed for a reason identified by this method
      * @throws RuntimeException if any other kind of  error occurred
      */
+    @SuppressWarnings("checkstyle:MagicNumber")
     public boolean compile(final JavaCompiler compiler, final Options configuration, final Writer otherOutput)
             throws IOException {
-
+        /*
+         * Announce what the compiler is about to do.
+         */
         if (sourceFiles.isEmpty()) {
             String message = "No sources to compile.";
             try {
@@ -331,7 +455,7 @@ public class ToolExecutor {
         if (logger.isDebugEnabled()) {
             int n = sourceFiles.size();
             @SuppressWarnings("checkstyle:MagicNumber")
-            var sb = new StringBuilder(n * 40).append("Compiling ").append(n).append(" source files:");
+            var sb = new StringBuilder(n * 40).append("The source files to compile are:");
             for (SourceFile file : sourceFiles) {
                 sb.append(System.lineSeparator()).append("    ").append(file);
             }
@@ -344,69 +468,61 @@ public class ToolExecutor {
          * disposal in order to reuse its cache.
          */
         boolean success = true;
-        final var unresolvedPaths = new ArrayList<Path>();
         try (StandardJavaFileManager fileManager = compiler.getStandardFileManager(listener, LOCALE, encoding)) {
-            /*
-             * Dispatch all dependencies on the kind of paths determined by `DependencyResolver`:
-             * class-path, module-path, annotation processor class-path/module-path, etc.
-             * This configuration will be unchanged for all compilation units.
-             */
-            List<String> patchedOptions = configuration.options; // Workaround for JDK-TBD.
-            for (Map.Entry<PathType, List<Path>> entry : dependencies.entrySet()) {
-                List<Path> paths = entry.getValue();
-                PathType key = entry.getKey(); // TODO: replace by pattern matching in Java 21.
-                if (key instanceof JavaPathType type) {
-                    Optional<JavaFileManager.Location> location = type.location();
-                    if (location.isPresent()) { // Cannot use `Optional.ifPresent(…)` because of checked IOException.
-                        fileManager.setLocationFromPaths(location.get(), paths);
-                        continue;
-                    }
-                } else if (key instanceof JavaPathType.Modular type) {
-                    Optional<JavaFileManager.Location> location = type.rawType().location();
-                    if (location.isPresent()) {
-                        try {
-                            fileManager.setLocationForModule(location.get(), type.moduleName(), paths);
-                        } catch (UnsupportedOperationException e) { // Workaround forJDK-TBD.
-                            if (patchedOptions == configuration.options) {
-                                patchedOptions = new ArrayList<>(patchedOptions);
-                            }
-                            patchedOptions.addAll(Arrays.asList(type.option(paths)));
-                        }
-                        continue;
-                    }
-                }
-                unresolvedPaths.addAll(paths);
-            }
-            if (!unresolvedPaths.isEmpty()) {
-                var sb = new StringBuilder("Cannot determine where to place the following artifacts:");
-                for (Path p : unresolvedPaths) {
-                    sb.append(System.lineSeparator()).append(" - ").append(p);
-                }
-                logger.warn(sb);
-            }
+            setDependencyPaths(fileManager);
             if (!generatedSourceDirectories.isEmpty()) {
                 fileManager.setLocationFromPaths(StandardLocation.SOURCE_OUTPUT, generatedSourceDirectories);
             }
+            Path latestOutputDirectory = null;
             /*
              * More than one compilation unit may exist in the case of a multi-releases project.
              * Units are compiled in the order of the release version, with base compiled first.
+             * At the beginning of each new iteration, `latestOutputDirectory` is the path to
+             * the compiled classes of the previous version.
              */
             compile:
-            for (SourcesForRelease unit : SourcesForRelease.groupByReleaseAndModule(sourceFiles)) {
-                for (Map.Entry<String, Set<Path>> root : unit.roots.entrySet()) {
-                    String moduleName = root.getKey();
-                    if (moduleName.isBlank()) {
-                        fileManager.setLocationFromPaths(StandardLocation.SOURCE_PATH, root.getValue());
+            for (final SourcesForRelease unit : groupByReleaseAndModule()) {
+                configuration.setRelease(unit.getReleaseString());
+                for (final Map.Entry<String, Set<Path>> root : unit.roots.entrySet()) {
+                    final String moduleName = root.getKey();
+                    final Set<Path> sources = root.getValue();
+                    final boolean modular = !moduleName.isBlank();
+                    if (!modular) {
+                        fileManager.setLocationFromPaths(StandardLocation.SOURCE_PATH, sources);
+                    }
+                    if (latestOutputDirectory == null) {
+                        /*
+                         * Compiling the base version. The source directories and declared as the source paths
+                         * or module source paths, and the output directory has no `META-INF/versions/` part.
+                         */
+                        if (modular) {
+                            fileManager.setLocationForModule(StandardLocation.MODULE_SOURCE_PATH, moduleName, sources);
+                        }
+                        latestOutputDirectory = outputDirectory;
                     } else {
-                        fileManager.setLocationForModule(
-                                StandardLocation.MODULE_SOURCE_PATH, moduleName, root.getValue());
+                        /*
+                         * Compiling a version after the base version. For a non-modular project,
+                         * the output directory of the previous version is added on the class-path.
+                         */
+                        if (!modular) {
+                            if (classpath == null) {
+                                classpath = new ArrayList<>();
+                            }
+                            classpath.add(0, latestOutputDirectory);
+                            fileManager.setLocationFromPaths(StandardLocation.CLASS_PATH, classpath);
+                        } else {
+                            // TODO: need to provide --patch-module. Difficulty is that we can specify only once.
+                            throw new UnsupportedOperationException(
+                                    "Multi-versions of a modular project is not yet implemented.");
+                        }
+                        latestOutputDirectory = Files.createDirectories(
+                                SourceDirectory.outputDirectoryForReleases(outputDirectory, unit.release));
                     }
                 }
                 /*
-                 * TODO: for all compilations after the base one, add the base to class-path or module-path.
-                 * TODO: prepend META-INF/version/## to output directory if needed.
+                 * TODO: For all compilations after the base one, add the base to class-path or module-path.
                  */
-                fileManager.setLocationFromPaths(StandardLocation.CLASS_OUTPUT, Set.of(outputDirectory));
+                fileManager.setLocationFromPaths(StandardLocation.CLASS_OUTPUT, Set.of(latestOutputDirectory));
                 /*
                  * Compile the source files now. The following loop should be executed exactly once.
                  * It may be executed twice when compiling test classes overwriting the `module-info`,
@@ -416,8 +532,7 @@ public class ToolExecutor {
                 JavaCompiler.CompilationTask task;
                 for (CompilationTaskSources c : toCompilationTasks(unit)) {
                     Iterable<? extends JavaFileObject> sources = fileManager.getJavaFileObjectsFromPaths(c.files);
-                    task = compiler.getTask(otherOutput, fileManager, listener, patchedOptions, null, sources);
-                    patchedOptions = configuration.options; // Patched options shall be used only once.
+                    task = compiler.getTask(otherOutput, fileManager, listener, configuration.options, null, sources);
                     success = c.compile(task);
                     if (!success) {
                         break compile;
@@ -442,6 +557,9 @@ public class ToolExecutor {
      * In the latter case, we need to compile the test {@code module-info} separately, before the other test classes.
      */
     CompilationTaskSources[] toCompilationTasks(final SourcesForRelease unit) {
+        if (unit.files.isEmpty()) {
+            return new CompilationTaskSources[0];
+        }
         return new CompilationTaskSources[] {new CompilationTaskSources(unit.files)};
     }
 }

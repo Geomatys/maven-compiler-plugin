@@ -108,7 +108,7 @@ final class SourceFile {
         if (outputFile == null) {
             outputFile = toOutputFile(
                     directory.root,
-                    directory.outputDirectory,
+                    directory.getOutputDirectory(),
                     file,
                     directory.fileKind.extension,
                     directory.outputFileKind.extension);

@@ -180,14 +180,35 @@ public abstract class AbstractCompilerMojo implements Mojo {
     protected String target;
 
     /**
-     * The {@code --release} argument for the Java compiler.
-     * If omitted, then the compiler will generate bytecodes for the Java version running the compiler.
+     * The {@code --release} argument for the Java compiler when the sources do not declare this version.
+     * The suggested way to declare the target Java release is to specify it with the sources like below:
+     *
+     * <pre>{@code
+     * <build>
+     *   <sources>
+     *     <source>
+     *       <directory>src/main/java</directory>
+     *       <targetVersion>17</targetVersion>
+     *     </source>
+     *   </sources>
+     * </build>}</pre>
+     *
+     * If such {@code <targetVersion>} element is found, it has precedence over this {@code release} property.
+     * If a source does not declare a target Java version, then the value of this {@code release} property is
+     * used as a fallback.
+     * If omitted, the compiler will generate bytecodes for the Java version running the compiler.
      *
      * @see <a href="https://docs.oracle.com/en/java/javase/17/docs/specs/man/javac.html#option-release">javac --release</a>
      * @since 3.6
      */
     @Parameter(property = "maven.compiler.release")
     protected String release;
+
+    /**
+     * Whether {@link #target} or {@link #release} has a non-blank value.
+     * Used for logging a warning if no target Java version was specified.
+     */
+    private boolean targetOrReleaseSet;
 
     /**
      * Whether to enable preview language features of the java compiler.
@@ -204,8 +225,11 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * the directories will be obtained from the {@code <Source>} elements declared in the project.
      * If non-empty, the project {@code <Source>} elements are ignored. This configuration option
      * should be used only when there is a need to override the project configuration.
+     *
+     * @deprecated Replaced by the project-wide {@code <sources>} element.
      */
     @Parameter
+    @Deprecated(since = "4.0.0")
     protected List<String> compileSourceRoots;
 
     /**
@@ -821,6 +845,9 @@ public abstract class AbstractCompilerMojo implements Mojo {
     /**
      * The logger for reporting information or warnings to the user.
      * Currently, this is also used for console output.
+     *
+     * <h4>Thread safety</h4>
+     * This logger should be thread-safe if the {@link ToolExecutor} is executed in a background thread.
      */
     @Inject
     protected Log logger;
@@ -934,9 +961,9 @@ public abstract class AbstractCompilerMojo implements Mojo {
         if (compileSourceRoots == null || compileSourceRoots.isEmpty()) {
             ProjectScope scope = compileScope.projectScope();
             Stream<SourceRoot> roots = projectManager.getEnabledSourceRoots(project, scope, Language.JAVA_FAMILY);
-            return SourceDirectory.fromProject(roots, outputDirectory);
+            return SourceDirectory.fromProject(roots, getRelease(), outputDirectory);
         } else {
-            return SourceDirectory.fromPluginConfiguration(compileSourceRoots, outputDirectory);
+            return SourceDirectory.fromPluginConfiguration(compileSourceRoots, getRelease(), outputDirectory);
         }
     }
 
@@ -1068,13 +1095,31 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * Creates a new task by taking a snapshot of the current configuration of this <abbr>MOJO</abbr>.
      * This method creates the {@linkplain #outputDirectory output directory} if it does not already exist.
      *
+     * <h4>Multi-threading</h4>
+     * This method and the returned objects are not thread-safe.
+     * However, this method takes a snapshot of the configuration of this <abbr>MOJO</abbr>.
+     * Changes in this <abbr>MOJO</abbr> after this method call will not affect the returned executor.
+     * Therefore, the executor can safely be executed in a background thread,
+     * provided that the {@link #logger} is thread-safe.
+     *
      * @param listener where to send compilation warnings, or {@code null} for the Maven logger
      * @throws MojoException if this method identifies an invalid parameter in this <abbr>MOJO</abbr>
      * @return the task to execute for compiling the project using the configuration in this <abbr>MOJO</abbr>
      * @throws IOException if an error occurred while creating the output directory or scanning the source directories
      */
     public ToolExecutor createExecutor(DiagnosticListener<? super JavaFileObject> listener) throws IOException {
-        return new ToolExecutor(this, listener);
+        var executor = new ToolExecutor(this, listener);
+        if (!(targetOrReleaseSet || executor.isReleaseSpecifiedForAll())) {
+            MessageBuilder mb = messageBuilderFactory
+                    .builder()
+                    .a("No explicit value set for --release or --target. "
+                            + "To ensure the same result in different environments, please add")
+                    .newline()
+                    .newline();
+            writePlugin(mb, "release", String.valueOf(Runtime.version().feature()));
+            logger.warn(mb.build());
+        }
+        return executor;
     }
 
     /**
@@ -1138,6 +1183,8 @@ public abstract class AbstractCompilerMojo implements Mojo {
 
     /**
      * Parses the parameters declared in the <abbr>MOJO</abbr>.
+     * The {@link #release} parameter is excluded because it is handled in a special way
+     * in order to support the compilation of multi-version projects.
      *
      * @param  compiler  the tools to use for verifying the validity of options
      * @return the options after validation
@@ -1150,21 +1197,10 @@ public abstract class AbstractCompilerMojo implements Mojo {
          * For example, Maven will check for illegal values in the "-g" option only if the compiler rejected
          * the fully formatted option (e.g. "-g:vars,lines") that we provided to it.
          */
-        boolean targetOrReleaseSet;
         final var configuration = new Options(compiler, logger);
         configuration.addIfNonBlank("--source", getSource());
         targetOrReleaseSet = configuration.addIfNonBlank("--target", getTarget());
-        targetOrReleaseSet |= configuration.addIfNonBlank("--release", getRelease());
-        if (!targetOrReleaseSet && ProjectScope.MAIN.equals(compileScope.projectScope())) {
-            MessageBuilder mb = messageBuilderFactory
-                    .builder()
-                    .a("No explicit value set for --release or --target. "
-                            + "To ensure the same result in different environments, please add")
-                    .newline()
-                    .newline();
-            writePlugin(mb, "release", String.valueOf(Runtime.version().feature()));
-            logger.warn(mb.build());
-        }
+        targetOrReleaseSet |= configuration.setRelease(getRelease());
         configuration.addIfTrue("--enable-preview", enablePreview);
         configuration.addComaSeparated("-proc", proc, List.of("none", "only", "full"), null);
         if (annotationProcessors != null) {
@@ -1245,7 +1281,7 @@ public abstract class AbstractCompilerMojo implements Mojo {
          * In case of failure, or if debugging is enabled, dump the options to a file.
          * By default, the file will have the ".args" extension.
          */
-        if (!success || logger.isDebugEnabled()) {
+        if (!success || verbose || logger.isDebugEnabled()) {
             IOException suppressed = null;
             try {
                 writeDebugFile(configuration, executor.dependencies, executor.getSourceFiles());
@@ -1601,7 +1637,8 @@ public abstract class AbstractCompilerMojo implements Mojo {
                 throw e.getCause();
             }
         }
-        tipForCommandLineCompilation = commandLine.append(" @").append(path).toString();
+        tipForCommandLineCompilation =
+                commandLine.append(" @").append(relativize(path)).toString();
     }
 
     /**
