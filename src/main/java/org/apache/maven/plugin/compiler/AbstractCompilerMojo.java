@@ -1249,7 +1249,7 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * @throws MojoException if the compilation failed
      */
     private void compile(final JavaCompiler compiler, final Options configuration) throws IOException {
-        final var executor = createExecutor(null);
+        final ToolExecutor executor = createExecutor(null);
         if (!executor.applyIncrementalBuild(this, configuration)) {
             return;
         }
@@ -1290,7 +1290,7 @@ public abstract class AbstractCompilerMojo implements Mojo {
         if (!success || verbose || logger.isDebugEnabled()) {
             IOException suppressed = null;
             try {
-                writeDebugFile(configuration, executor.dependencies, executor.getSourceFiles());
+                writeDebugFile(executor, configuration);
                 if (success && tipForCommandLineCompilation != null) {
                     logger.debug(tipForCommandLineCompilation);
                     tipForCommandLineCompilation = null;
@@ -1594,14 +1594,11 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * If a file name contains embedded spaces, then the whole file name must be between double quotation marks.
      * The -J options are not supported.
      *
-     * @param configuration options to provide to the compiler
-     * @param dependencies the dependencies
-     * @param sourceFiles all files to compile
+     * @param executor the executor that compiled the classes
+     * @param configuration options provided to the compiler
      * @throws IOException if an error occurred while writing the debug file
      */
-    private void writeDebugFile(Options configuration, Map<PathType, List<Path>> dependencies, Stream<Path> sourceFiles)
-            throws IOException {
-
+    private void writeDebugFile(final ToolExecutor executor, final Options configuration) throws IOException {
         final Path path = getDebugFilePath();
         if (path == null) {
             logger.warn("The <debugFileName> parameter should not be empty.");
@@ -1613,7 +1610,7 @@ public abstract class AbstractCompilerMojo implements Mojo {
                 .append(executable != null ? executable : compilerId);
         try (BufferedWriter out = Files.newBufferedWriter(path)) {
             configuration.format(commandLine, out);
-            for (Map.Entry<PathType, List<Path>> entry : dependencies.entrySet()) {
+            for (Map.Entry<PathType, List<Path>> entry : executor.dependencies.entrySet()) {
                 List<Path> files = entry.getValue();
                 files = files.stream().map(this::relativize).toList();
                 String separator = "";
@@ -1629,7 +1626,7 @@ public abstract class AbstractCompilerMojo implements Mojo {
             out.write('"');
             out.newLine();
             try {
-                sourceFiles.forEach((file) -> {
+                executor.getSourceFiles().forEach((file) -> {
                     try {
                         out.write('"');
                         out.write(relativize(file).toString());

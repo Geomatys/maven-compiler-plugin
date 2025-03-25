@@ -84,7 +84,7 @@ class ToolExecutorForTest extends ToolExecutor {
 
     /**
      * Name of the main module to compile, or {@code null} if not yet determined.
-     * If the project is not modular, hen this field contains an empty string.
+     * If the project is not modular, then this field contains an empty string.
      *
      * TODO: use "*" as a sentinel value for modular source hierarchy.
      *
@@ -148,6 +148,7 @@ class ToolExecutorForTest extends ToolExecutor {
     /**
      * {@return the module name of the main code, or an empty string if none}.
      * This method reads the module descriptor when first needed and caches the result.
+     * This used if the user did not specified an explicit {@code <module>} element in the sources.
      *
      * @throws IOException if the module descriptor cannot be read.
      */
@@ -204,7 +205,7 @@ class ToolExecutorForTest extends ToolExecutor {
                     if (compile) {
                         // Needs to be initialized even if `name` is null.
                         if (addReads == null) {
-                            addReads = new StringJoiner(",", getMainModuleName() + "=", "");
+                            addReads = new StringJoiner(",");
                         }
                     }
                     Path path = entry.getValue();
@@ -237,7 +238,20 @@ class ToolExecutorForTest extends ToolExecutor {
             if (hasUnnamed) {
                 addReads.add("ALL-UNNAMED");
             }
-            configuration.addIfNonBlank("--add-reads", addReads.toString());
+            String reads = addReads.toString();
+            addReads(configuration, getMainModuleName(), reads);
+            for (SourceDirectory root : sourceDirectories) {
+                addReads(configuration, root.moduleName, reads);
+            }
+        }
+    }
+
+    /**
+     * Adds an {@code --add-reads} compiler option if the given module name is non-null and non-blank.
+     */
+    private static void addReads(Options configuration, String moduleName, String reads) {
+        if (moduleName != null && !moduleName.isBlank()) {
+            configuration.addIfNonBlank("--add-reads", moduleName + '=' + reads);
         }
     }
 

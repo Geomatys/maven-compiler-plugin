@@ -291,6 +291,16 @@ final class IncrementalBuild {
     private int previousOptionsHash;
 
     /**
+     * Hash code value of the current {@link Options#options} list.
+     */
+    private final int optionsHash;
+
+    /**
+     * Whether to save the list of source files.
+     */
+    private final boolean saveSourceList;
+
+    /**
      * Whether to recompile all source files if a file addition is detected.
      *
      * @see Aspect#REBUILD_ON_ADD
@@ -314,12 +324,20 @@ final class IncrementalBuild {
      *
      * @param mojo the MOJO which is compiling source code
      * @param sourceFiles all source files
+     * @param saveSourceList whether to save the list of source files in the cache
+     * @param options the compiler options
      * @param aspects result of {@link Aspect#parse(String)}
      * @throws IOException if the parent directory cannot be created
      */
-    IncrementalBuild(AbstractCompilerMojo mojo, List<SourceFile> sourceFiles, EnumSet<Aspect> aspects)
+    IncrementalBuild(
+            AbstractCompilerMojo mojo,
+            List<SourceFile> sourceFiles,
+            boolean saveSourceList,
+            Options configuration,
+            EnumSet<Aspect> aspects)
             throws IOException {
         this.sourceFiles = sourceFiles;
+        this.saveSourceList = saveSourceList;
         Path file = mojo.mojoStatusPath;
         cacheFile = Files.createDirectories(file.getParent()).resolve(file.getFileName());
         showCompilationChanges = mojo.showCompilationChanges;
@@ -328,6 +346,16 @@ final class IncrementalBuild {
         staleMillis = mojo.staleMillis;
         rebuildOnAdd = aspects.contains(Aspect.REBUILD_ON_ADD);
         rebuildOnChange = aspects.contains(Aspect.REBUILD_ON_CHANGE);
+        optionsHash = configuration.options.hashCode();
+    }
+
+    /**
+     * Deletes the cache if it exists.
+     *
+     * @throws IOException if an error occurred while deleting the file
+     */
+    public void deleteCache() throws IOException {
+        Files.deleteIfExists(cacheFile);
     }
 
     /**
@@ -353,12 +381,11 @@ final class IncrementalBuild {
      * If that flag is {@code false}, then only the filename is stored and the parent
      * is the same as the previous file.
      *
-     * @param optionsHash hash code value of the {@link Options#options} list
      * @param sources whether to save also the list of source files
      * @throws IOException if an error occurred while writing the cache file
      */
     @SuppressWarnings({"checkstyle:InnerAssignment", "checkstyle:NeedBraces"})
-    public void writeCache(final int optionsHash, final boolean sources) throws IOException {
+    public void writeCache() throws IOException {
         try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(
                 cacheFile,
                 StandardOpenOption.WRITE,
@@ -367,8 +394,8 @@ final class IncrementalBuild {
             out.writeLong(MAGIC_NUMBER);
             out.writeLong(buildTime);
             out.writeInt(optionsHash);
-            out.writeInt(sources ? sourceFiles.size() : 0);
-            if (sources) {
+            out.writeInt(saveSourceList ? sourceFiles.size() : 0);
+            if (saveSourceList) {
                 Path srcDir = null;
                 Path tgtDir = null;
                 Path previousParent = null;
@@ -646,16 +673,15 @@ final class IncrementalBuild {
     }
 
     /**
-     * Returns whether the compilar options have changed.
+     * Returns whether the compiler options have changed.
      * This method should be invoked only after {@link #inputFileTreeChanges} returned {@code null}.
      *
-     * @param optionsHash hash code value of the {@link Options#options} list
      * @return {@code null} if the project does not need to be rebuilt, otherwise a message saying why to rebuild
      * @throws IOException if an error occurred while loading the cache file
      *
      * @see Aspect#OPTIONS
      */
-    String optionChanges(int optionsHash) throws IOException {
+    String optionChanges() throws IOException {
         if (!cacheLoaded) {
             loadCache();
         }
