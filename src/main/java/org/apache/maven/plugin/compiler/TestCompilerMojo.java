@@ -201,7 +201,10 @@ public class TestCompilerMojo extends AbstractCompilerMojo {
      * <p>This field exists in this class only for transferring this information
      * to {@link ToolExecutorForTest#hasTestModuleInfo}, which is the class that
      * needs this information.</p>
+     *
+     * @deprecated Avoid {@code module-info.java} in tests.
      */
+    @Deprecated(since = "4.0.0")
     transient boolean hasTestModuleInfo;
 
     /**
