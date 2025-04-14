@@ -31,8 +31,6 @@
  */
 patch-module org.mymodule {
 
-    add-modules ALL-MODULE-PATH;  // For testing purpose, but a valid value would rather be TEST-MODULE-PATH.
-
     limit-modules org.junit.jupiter.api;
 
     // Similar to `requires` in module-info.

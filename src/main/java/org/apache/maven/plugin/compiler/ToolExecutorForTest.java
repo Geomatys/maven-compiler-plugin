@@ -255,8 +255,9 @@ class ToolExecutorForTest extends ToolExecutor {
             return;
         }
         addedModuleOptions = true;
-        final var addModules = new LinkedHashSet<String>();
         final var patches = new LinkedHashMap<String, ModuleInfoPatch>();
+        final var addModules = new LinkedHashSet<String>();
+        var addModulesDefinedOnce = addModules; // `--add-modules` is a global option to define only once.
         for (SourceDirectory source : sourceDirectories) {
             Path file = source.root.resolve("module-info-patch.txt");
             if (Files.notExists(file)) {
@@ -269,11 +270,12 @@ class ToolExecutorForTest extends ToolExecutor {
                 }
                 patches.putIfAbsent(module, null); // Remember that we will need to compute a value later.
             } else {
-                var info = new ModuleInfoPatch(getMainModuleName(), addModules);
+                var info = new ModuleInfoPatch(getMainModuleName());
                 try (BufferedReader reader = Files.newBufferedReader(file)) {
                     info.load(reader);
                 }
-                info.addTestModulePath(dependencyResolution, false);
+                info.addTestModulePath(dependencyResolution, false, addModulesDefinedOnce);
+                addModulesDefinedOnce = null;
                 if (patches.put(info.getModuleName(), info) != null) {
                     throw new ModuleInfoPatchException(
                             "\"module-info-patch " + info.getModuleName() + "\" is defined more than once.");
@@ -287,15 +289,16 @@ class ToolExecutorForTest extends ToolExecutor {
              */
         } else {
             /*
-             * Add `--add-modules` and `--add-reads` options with defailt values equivalent to
+             * Add `--add-modules` and `--add-reads` options with default values equivalent to
              * `TEST-MODULE-PATH` for every module that do not have a `module-info-patch` file.
              */
             ModuleInfoPatch info = null;
             for (Map.Entry<String, ModuleInfoPatch> entry : patches.entrySet()) {
                 if (entry.getValue() == null) {
                     if (info == null) {
-                        info = new ModuleInfoPatch(entry.getKey(), addModules);
-                        info.addTestModulePath(dependencyResolution, false);
+                        info = new ModuleInfoPatch(entry.getKey());
+                        info.addTestModulePath(dependencyResolution, false, addModulesDefinedOnce);
+                        addModulesDefinedOnce = null;
                         entry.setValue(info);
                     } else {
                         entry.setValue(info.patchWithSameReads(entry.getKey()));
@@ -303,6 +306,7 @@ class ToolExecutorForTest extends ToolExecutor {
                 }
             }
         }
+        ModuleInfoPatch.writeAddModules(configuration, addModules);
         for (ModuleInfoPatch info : patches.values()) {
             info.writeTo(configuration, false);
         }

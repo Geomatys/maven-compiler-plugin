@@ -23,7 +23,6 @@ import javax.tools.OptionChecker;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.util.LinkedHashSet;
 
 import org.apache.maven.api.plugin.Log;
 import org.junit.jupiter.api.Test;
@@ -44,7 +43,7 @@ public class ModuleInfoPatchTest implements OptionChecker {
      */
     @Test
     public void testRead() throws IOException {
-        var info = new ModuleInfoPatch(null, new LinkedHashSet<String>());
+        var info = new ModuleInfoPatch(null);
         try (Reader r = new InputStreamReader(ModuleInfoPatchTest.class.getResourceAsStream("module-info-patch.txt"))) {
             info.load(r);
         }
@@ -52,8 +51,6 @@ public class ModuleInfoPatchTest implements OptionChecker {
         info.writeTo(config, true);
         assertArrayEquals(
                 new String[] {
-                    "--add-modules",
-                    "ALL-MODULE-PATH",
                     "--limit-modules",
                     "org.junit.jupiter.api",
                     "--add-reads",

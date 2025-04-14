@@ -23,7 +23,6 @@ import java.io.Reader;
 import java.io.StreamTokenizer;
 import java.lang.module.ModuleDescriptor;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -36,6 +35,15 @@ import org.apache.maven.api.services.DependencyResolverResult;
 
 /**
  * Reader of {@code module-info-patch.txt} files.
+ * The options manages by this class are the options that are not defined by Maven dependencies.
+ * They are the options for opening or exporting packages to other modules, or reading more modules.
+ * The values of these options are module names or package names.
+ * Options with path values are not managed by this class.
+ *
+ * <h2>Omitted option</h2>
+ * The {@code --add-modules} option is omitted because this is a global option, not an option defined
+ * on a per-module basis. Furthermore, in a Maven context, its value is controlled by the dependencies
+ * declared in the {@code pom.xml} file.
  *
  * @author Martin Desruisseaux
  */
@@ -45,13 +53,6 @@ final class ModuleInfoPatch {
      * Other keywords such as {@code "ALL-MODULE-PATH"} are understood by the Java compiler.
      */
     private static final String TEST_MODULE_PATH = "TEST-MODULE-PATH";
-
-    /**
-     * Special cases for the {@code --add-modules} option.
-     * The {@value #TEST_MODULE_PATH} keyword is specific to Maven.
-     * Other keywords in this set are recognized by the Java compiler.
-     */
-    private static final Set<String> ADD_MODULES_SPECIAL_CASES = Set.of("ALL-MODULE-PATH", TEST_MODULE_PATH);
 
     /**
      * Special cases for the {@code --add-exports} option.
@@ -66,14 +67,6 @@ final class ModuleInfoPatch {
      * @see #getModuleName()
      */
     private String moduleName;
-
-    /**
-     * Values parsed from the {@code module-info-patch} file for {@code --add-modules} option.
-     * A unique set is shared by {@code ModuleInfoPatch} instances of a project, because there
-     * is only one {@code --add-module} option applying to all modules. The values will be the
-     * union of the values provided by all {@code module-info-patch} files.
-     */
-    private final Set<String> addModules;
 
     /**
      * Values parsed from the {@code module-info-patch} file for {@code --limit-modules} option.
@@ -101,12 +94,6 @@ final class ModuleInfoPatch {
     private final Map<String, Set<String>> addOpens;
 
     /**
-     * Whether to add all modules on the test module path. This is requested by the {@link #TEST_MODULE_PATH} keyword
-     * in {@code add-modules} option. That keyword is specific to Maven and therefore cannot be given to the compiler.
-     */
-    private boolean addAllTestModulePath;
-
-    /**
      * Whether to read all the test module path. This is requested by the {@link #TEST_MODULE_PATH} keyword in
      * {@code add-reads} option. That keyword is specific to Maven and therefore cannot be given to the compiler.
      */
@@ -125,16 +112,13 @@ final class ModuleInfoPatch {
      * Creates an initially empty module patch.
      *
      * @param defaultModule the name of the default module if there is no {@code module-info-patch}
-     * @param addModules the shared set where to add the values of the {@code --add-modules} option
      */
-    ModuleInfoPatch(String defaultModule, final Set<String> addModules) {
+    ModuleInfoPatch(String defaultModule) {
         if (defaultModule != null && !defaultModule.isBlank()) {
             moduleName = defaultModule;
         }
-        addAllTestModulePath = true;
         readAllTestModulePath = true; // Default value if there is no {@code module-info-patch}.
         exportsToTestModulePath = new LinkedHashSet<>();
-        this.addModules = addModules;
         limitModules = new LinkedHashSet<>();
         addReads = new LinkedHashSet<>();
         addExports = new LinkedHashMap<>();
@@ -144,24 +128,18 @@ final class ModuleInfoPatch {
     /**
      * Creates a module patch with the specified {@code --add-reads} options and everything else empty.
      *
-     * @param addReads the {@code --add-reads} option
      * @param moduleName the name of the module to patch
+     * @param addReads the {@code --add-reads} option
      *
      * @see #patchWithSameReads(String)
      */
-    private ModuleInfoPatch(Set<String> addReads, String moduleName) {
+    private ModuleInfoPatch(String moduleName, Set<String> addReads) {
         this.moduleName = moduleName;
         this.addReads = addReads;
-        /*
-         * Really need `Collections.emptyFoo()` here, not `Set.of()` or `Map.of()`.
-         * A difference is that the former silently accept calls to `clear()` as
-         * no-operation, while the latter throw `UnsupportedOperationException`.
-         */
-        exportsToTestModulePath = Collections.emptySet();
-        addModules = Collections.emptySet();
-        limitModules = Collections.emptySet();
-        addExports = Collections.emptyMap();
-        addOpens = Collections.emptyMap();
+        exportsToTestModulePath = Set.of();
+        limitModules = Set.of();
+        addExports = Map.of();
+        addOpens = Map.of();
     }
 
     /**
@@ -177,15 +155,10 @@ final class ModuleInfoPatch {
         reader.slashStarComments(true);
         expectToken(reader, "patch-module");
         moduleName = nextName(reader, true);
-        addAllTestModulePath = false;
         readAllTestModulePath = false;
         expectToken(reader, '{');
         while (reader.nextToken() == StreamTokenizer.TT_WORD) {
             switch (reader.sval) {
-                case "add-modules":
-                    readModuleList(reader, addModules, ADD_MODULES_SPECIAL_CASES);
-                    addAllTestModulePath |= addModules.remove(TEST_MODULE_PATH);
-                    break;
                 case "limit-modules":
                     readModuleList(reader, limitModules, Set.of());
                     break;
@@ -342,17 +315,21 @@ final class ModuleInfoPatch {
     }
 
     /**
-     * Eventually adds all dependencies declared in the test module path. These dependencies are added only if the
-     * user specified the {@code TEST-MODULE-PATH} value to the {@code add-reads} or {@code add-modules} options,
-     * or if these options were implicit because there is no {@code module-info-patch}. If not requested implicitly
-     * or explicitly, or if {@code dependencyResolution} is null, then this method does nothing.
+     * Eventually adds all dependencies declared in the test module path.
+     * These dependencies are automatically added to the {@code --add-modules} option once for all modules,
+     * then added to the {@code add-reads} option if the user specified the {@code TEST-MODULE-PATH} value.
+     * The latter is on a per-module basis. These options are also added implicitly if the user did not put
+     * a {@code module-info-patch} file in the test.
      *
      * @param dependencyResolution the result of resolving the dependencies, or {@code null} if none
      * @param runtime whether to include the runtime-only dependencies
+     * @param addModules where to add the {@code --add-modules} option, or {@code null} if none
      * @throws IOException if an error occurred while reading information from a dependency
      */
-    public void addTestModulePath(DependencyResolverResult dependencyResolution, boolean runtime) throws IOException {
-        if (dependencyResolution == null || !(addAllTestModulePath || readAllTestModulePath)) {
+    public void addTestModulePath(
+            final DependencyResolverResult dependencyResolution, final boolean runtime, final Set<String> addModules)
+            throws IOException {
+        if (dependencyResolution == null || (addModules == null && !readAllTestModulePath)) {
             return;
         }
         final var done = new HashSet<String>(); // Added modules and their dependencies.
@@ -382,7 +359,7 @@ final class ModuleInfoPatch {
                 }
             } else if (done.add(name)) {
                 boolean modified = false;
-                if (addAllTestModulePath) {
+                if (addModules != null) {
                     modified |= addModules.add(name);
                 }
                 if (readAllTestModulePath) {
@@ -416,7 +393,7 @@ final class ModuleInfoPatch {
         if (otherModule == null || otherModule.isBlank()) {
             return null;
         }
-        return new ModuleInfoPatch(addReads, otherModule);
+        return new ModuleInfoPatch(otherModule, addReads);
     }
 
     /**
@@ -460,13 +437,24 @@ final class ModuleInfoPatch {
     }
 
     /**
+     * Writes the {@code --add-modules} option to the given set of options. Contrarily to other
+     * options managed by {@code ModuleInfoPatch}, the {@code --add-modules} option is global,
+     * not an option with values defined on a per-module basis.
+     *
+     * @param target where to write the options
+     * @param addModules the {@code --add-modules} option values, or {@code null} or empty if none
+     */
+    static void writeAddModules(Options target, Set<String> addModules) {
+        write("add-modules", null, addModules, target);
+    }
+
+    /**
      * Writes the options.
      *
      * @param target where to write the options
      * @param opens whether to include the {@code --add-opens} options
      */
     public void writeTo(Options target, boolean opens) {
-        write("add-modules", null, addModules, target);
         write("limit-modules", null, limitModules, target);
         if (moduleName != null) {
             write("add-reads", moduleName, addReads, target);
@@ -475,6 +463,5 @@ final class ModuleInfoPatch {
                 write("add-opens", addOpens, target);
             }
         }
-        addModules.clear(); // Add modules only once (this set is shared by other instances).
     }
 }

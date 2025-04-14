@@ -401,10 +401,8 @@ public class TestCompilerMojo extends AbstractCompilerMojo {
             message.a("Overwriting the ")
                     .warning(MODULE_INFO + JAVA_FILE_SUFFIX)
                     .a(" file in the test directory is deprecated. Use ")
-                    .info("--add-reads")
-                    .a(", ")
-                    .info("--add-modules")
-                    .a(" and related options instead.");
+                    .info("module-info-patch.txt")
+                    .a(" instead.");
             logger.warn(message.toString());
             if (SUPPORT_LEGACY) {
                 return useModulePath;
