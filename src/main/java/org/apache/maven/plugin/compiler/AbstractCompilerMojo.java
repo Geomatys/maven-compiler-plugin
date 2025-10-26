@@ -668,17 +668,26 @@ public abstract class AbstractCompilerMojo implements Mojo {
                                 IncrementalBuild.Aspect.REBUILD_ON_ADD)
                         : EnumSet.of(IncrementalBuild.Aspect.CLASSES);
             }
-            var aspects = EnumSet.of(
+            return EnumSet.of(
                     IncrementalBuild.Aspect.OPTIONS,
                     IncrementalBuild.Aspect.DEPENDENCIES,
                     IncrementalBuild.Aspect.SOURCES);
-            if (hasAnnotationProcessor(false)) {
+        }
+        return IncrementalBuild.Aspect.parse(incrementalCompilation);
+    }
+
+    /**
+     * Amends the configuration of incremental compilation for the presence of annotation processors.
+     *
+     * @param aspects the configuration to amend if an annotation processor is found
+     * @param dependencyTypes the type of dependencies, for checking if any of them is a processor path
+     */
+    final void amendincrementalCompilation(EnumSet<IncrementalBuild.Aspect> aspects, Set<PathType> dependencyTypes) {
+        if (incrementalCompilation == null || incrementalCompilation.isBlank()) {
+            if (hasAnnotationProcessor(dependencyTypes, false)) {
                 aspects.add(IncrementalBuild.Aspect.REBUILD_ON_ADD);
                 aspects.add(IncrementalBuild.Aspect.REBUILD_ON_CHANGE);
             }
-            return aspects;
-        } else {
-            return IncrementalBuild.Aspect.parse(incrementalCompilation);
         }
     }
 
@@ -1559,11 +1568,6 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * Adds paths to the annotation processor dependencies. Paths are added to the list associated
      * to the {@link JavaPathType#PROCESSOR_CLASSES} entry of given map, which should be modifiable.
      *
-     * <h4>Implementation note</h4>
-     * We rely on the fact that {@link org.apache.maven.impl.DefaultDependencyResolverResult} creates
-     * modifiable instances of map and lists. This is a fragile assumption, but this method is deprecated anyway
-     * and may be removed in a future version.
-     *
      * @param addTo the modifiable map and lists where to append more paths to annotation processor dependencies
      * @throws MojoException if an error occurred while resolving the dependencies
      *
@@ -1610,38 +1614,26 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * {@return whether an annotation processor seems to be present}
      * This method is invoked if the user did not specified explicit incremental compilation options.
      *
+     * @param dependencyTypes the type of dependencies, for checking if any of them is a processor path
      * @param strict whether to be conservative if the current Java version is older than 23
      *
      * @see #incrementalCompilation
      */
-    private boolean hasAnnotationProcessor(final boolean strict) {
+    private boolean hasAnnotationProcessor(final Set<PathType> dependencyTypes, final boolean strict) {
         if ("none".equalsIgnoreCase(proc)) {
             return false;
         }
         if (proc == null || proc.isBlank()) {
-            if (strict && !isVersionEqualOrNewer("RELEASE_23")) {
-                return true; // Before Java 23, default value of `-proc` was `full`.
-            }
             /*
              * If the `proc` parameter was not specified, its default value depends on the Java version.
              * It was "full" prior Java 23 and become "none if no other processor option" since Java 23.
              */
-            if (annotationProcessors == null || annotationProcessors.length == 0) {
-                if (annotationProcessorPaths == null || annotationProcessorPaths.isEmpty()) {
-                    DependencyResolver resolver = session.getService(DependencyResolver.class);
-                    if (resolver == null) { // Null value happen during tests, depending on the mock used.
-                        return false;
+            if (!strict || isVersionEqualOrNewer("RELEASE_23")) {
+                if (annotationProcessors == null || annotationProcessors.length == 0) {
+                    if (annotationProcessorPaths == null || annotationProcessorPaths.isEmpty()) {
+                        return dependencyTypes.contains(JavaPathType.PROCESSOR_CLASSES)
+                                || dependencyTypes.contains(JavaPathType.PROCESSOR_MODULES);
                     }
-                    var allowedTypes = EnumSet.of(JavaPathType.PROCESSOR_CLASSES, JavaPathType.PROCESSOR_MODULES);
-                    DependencyResolverResult dependencies = resolver.resolve(DependencyResolverRequest.builder()
-                            .session(session)
-                            .project(project)
-                            .requestType(DependencyResolverRequest.RequestType.COLLECT)
-                            .pathScope(compileScope)
-                            .pathTypeFilter(allowedTypes)
-                            .build());
-
-                    return !dependencies.getDependencies().isEmpty();
                 }
             }
         }
@@ -1653,10 +1645,11 @@ public abstract class AbstractCompilerMojo implements Mojo {
      * known to the project manager. This is used for adding the output of annotation processor.
      * The returned set is either empty or a singleton.
      *
+     * @param dependencyTypes the type of dependencies, for checking if any of them is a processor path
      * @return the added directory in a singleton set, or an empty set if none
      * @throws IOException if the directory cannot be created
      */
-    final Set<Path> addGeneratedSourceDirectory() throws IOException {
+    final Set<Path> addGeneratedSourceDirectory(final Set<PathType> dependencyTypes) throws IOException {
         Path generatedSourcesDirectory = getGeneratedSourcesDirectory();
         if (generatedSourcesDirectory == null) {
             return Set.of();
@@ -1666,7 +1659,7 @@ public abstract class AbstractCompilerMojo implements Mojo {
          * However, if a directory already exists, use it because maybe its content was generated by
          * another plugin executed before the compiler plugin.
          */
-        if (hasAnnotationProcessor(true)) {
+        if (hasAnnotationProcessor(dependencyTypes, true)) {
             // `createDirectories(Path)` does nothing if the directory already exists.
             generatedSourcesDirectory = Files.createDirectories(generatedSourcesDirectory);
         } else if (Files.notExists(generatedSourcesDirectory)) {
