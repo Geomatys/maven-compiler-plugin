@@ -33,6 +33,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -119,8 +120,33 @@ final class WorkaroundForPatchModule extends ForwardingJavaFileManager<StandardJ
     }
 
     /**
+     * Returns the given options in a list but without quotes between filenames.
+     * Maven 4.0.0-RC-5 puts filenames between quotes like the example shown below,
+     * but we need to remove these quotes before to pass the options to
+     * {@link JavaFileManager} or {@link ProcessBuilder}:
+     *
+     * <blockquote><pre>--patch-module foo.bar="/something/target/classes"</pre></blockquote>
+     *
+     * <b>Note:</b>
+     * Maven 4.0.0-RC-4 did not put filenames between quotes, which gives the impression of a regression.
+     * However, we should not necessarily modify Maven core because of this issue, because this whole
+     * {@code WorkaroundForPatchModule} class is (as of Java 24) a workaround for {@link JavaFileManager}
+     * not accepting {@link StandardLocation#PATCH_MODULE_PATH} in calls to {@code setLocationForModule(…)}.
+     */
+    static List<String> optionWithoutQuotes(final String[] options) {
+        for (int i = 0; i < options.length; i++) {
+            String option = options[i];
+            int s = option.indexOf('"');
+            if (s >= 0 && (s == 0 || option.charAt(s - 1) == '=') && option.endsWith("\"")) {
+                options[i] = option.substring(0, s) + option.substring(s + 1, option.length() - 1);
+            }
+        }
+        return Arrays.asList(options);
+    }
+
+    /**
      * Sets a module path by asking the file manager to parse an option formatted by this method.
-     * Invoked when a module path cannot be specified through the API
+     * Invoked when a module path cannot be specified through the standard <abbr>API</abbr>.
      * This is the workaround described in class Javadoc.
      *
      * @param fileManager the file manager on which an attempt to set the location has been made and failed
@@ -136,8 +162,8 @@ final class WorkaroundForPatchModule extends ForwardingJavaFileManager<StandardJ
             UnsupportedOperationException cause)
             throws IOException {
 
+        Iterator<String> it = optionWithoutQuotes(type.option(paths)).iterator();
         String message;
-        Iterator<String> it = Arrays.asList(type.option(paths)).iterator();
         if (!fileManager.handleOption(it.next(), it)) {
             message = "Failed to set the %s option for module %s";
         } else if (it.hasNext()) {
