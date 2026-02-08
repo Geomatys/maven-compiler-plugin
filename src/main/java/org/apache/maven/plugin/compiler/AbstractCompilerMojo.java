@@ -1584,10 +1584,11 @@ public abstract class AbstractCompilerMojo implements Mojo {
          */
         Exception exception = null;
         for (Exception cause : dependencies.getExceptions()) {
+            if (cause instanceof UncheckedIOException e) {
+                cause = e.getCause();
+            }
             if (exception != null) {
                 exception.addSuppressed(cause);
-            } else if (cause instanceof UncheckedIOException e) {
-                exception = e.getCause();
             } else if (cause instanceof RuntimeException || cause instanceof IOException) {
                 exception = cause;
             } else {
